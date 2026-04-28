@@ -1,6 +1,7 @@
 'use client';
 
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { useI18n } from '@/lib/i18n';
 
 type ModeToggleProps = {
     currentMode: 'generate' | 'edit';
@@ -8,6 +9,8 @@ type ModeToggleProps = {
 };
 
 export function ModeToggle({ currentMode, onModeChange }: ModeToggleProps) {
+    const { t } = useI18n();
+
     return (
         <Tabs
             value={currentMode}
@@ -21,7 +24,7 @@ export function ModeToggle({ currentMode, onModeChange }: ModeToggleProps) {
                             ? 'border-white bg-white text-black'
                             : 'border-dashed border-white/30 bg-transparent text-white/60 hover:border-white/50 hover:text-white/80'
                     } `}>
-                    Generate
+                    {t('mode.generate')}
                 </TabsTrigger>
                 <TabsTrigger
                     value='edit'
@@ -30,7 +33,7 @@ export function ModeToggle({ currentMode, onModeChange }: ModeToggleProps) {
                             ? 'border-white bg-white text-black'
                             : 'border-dashed border-white/30 bg-transparent text-white/60 hover:border-white/50 hover:text-white/80'
                     } `}>
-                    Edit
+                    {t('mode.edit')}
                 </TabsTrigger>
             </TabsList>
         </Tabs>

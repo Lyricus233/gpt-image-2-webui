@@ -31,7 +31,10 @@ export function validateGptImage2Size(width: number, height: number): SizeValida
         return { valid: false, reason: `Total pixels must be at least ${GPT_IMAGE_2_MIN_PIXELS.toLocaleString()}.` };
     }
     if (pixels > GPT_IMAGE_2_MAX_PIXELS) {
-        return { valid: false, reason: `Total pixels must be no more than ${GPT_IMAGE_2_MAX_PIXELS.toLocaleString()}.` };
+        return {
+            valid: false,
+            reason: `Total pixels must be no more than ${GPT_IMAGE_2_MAX_PIXELS.toLocaleString()}.`
+        };
     }
     return { valid: true };
 }
@@ -50,9 +53,9 @@ export function getPresetDimensions(preset: SizePreset, model: GptImageModel): s
         case 'square':
             return isGptImage2 ? '2048x2048' : '1024x1024';
         case 'landscape':
-            return isGptImage2 ? '3072x2048' : '1536x1024';
+            return isGptImage2 ? '2560x1440' : '1536x1024';
         case 'portrait':
-            return isGptImage2 ? '2048x3072' : '1024x1536';
+            return isGptImage2 ? '1440x2560' : '1024x1536';
     }
 }
 
@@ -64,6 +67,6 @@ export function getPresetTooltip(preset: SizePreset, model: GptImageModel): stri
     if (!dims) return null;
     const [w, h] = dims.split('x').map(Number);
     const mp = ((w * h) / 1_000_000).toFixed(1);
-    const ratio = preset === 'square' ? '1:1' : preset === 'landscape' ? '3:2' : '2:3';
+    const ratio = preset === 'square' ? '1:1' : preset === 'landscape' ? '16:9' : '9:16';
     return `${w} × ${h} · ${ratio} · ${mp} MP`;
 }

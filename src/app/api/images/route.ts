@@ -23,12 +23,8 @@ type StreamingEvent = {
     error?: string;
 };
 
-const openai = new OpenAI({
-    apiKey: process.env.OPENAI_API_KEY,
-    baseURL: process.env.OPENAI_API_BASE_URL
-});
-
 const outputDir = path.resolve(process.cwd(), 'generated-images');
+const DEFAULT_API_BASE_URL = 'https://api.774966.xyz/v1';
 
 // Define valid output formats for type safety
 const VALID_OUTPUT_FORMATS = ['png', 'jpeg', 'webp'] as const;
@@ -76,10 +72,6 @@ function sha256(data: string): string {
 export async function POST(request: NextRequest) {
     console.log('Received POST request to /api/images');
 
-    if (!process.env.OPENAI_API_KEY) {
-        console.error('OPENAI_API_KEY is not set.');
-        return NextResponse.json({ error: 'Server configuration error: API key not found.' }, { status: 500 });
-    }
     try {
         let effectiveStorageMode: 'fs' | 'indexeddb';
         const explicitMode = process.env.NEXT_PUBLIC_IMAGE_STORAGE_MODE;
@@ -117,15 +109,29 @@ export async function POST(request: NextRequest) {
             }
         }
 
+        const localApiKey = (formData.get('apiKey') as string | null)?.trim();
+        const localBaseUrl = (formData.get('baseUrl') as string | null)?.trim();
+        const apiKey = localApiKey || process.env.OPENAI_API_KEY;
+        const baseURL = localBaseUrl || process.env.OPENAI_API_BASE_URL || DEFAULT_API_BASE_URL;
+
+        if (!apiKey) {
+            console.error('No API key was provided by local settings or OPENAI_API_KEY.');
+            return NextResponse.json(
+                { error: 'API key not found. Add one in Settings or configure OPENAI_API_KEY.' },
+                { status: 500 }
+            );
+        }
+
+        const openai = new OpenAI({
+            apiKey,
+            baseURL: baseURL || undefined
+        });
+
         const mode = formData.get('mode') as 'generate' | 'edit' | null;
         const prompt = formData.get('prompt') as string | null;
-        const model =
-            (formData.get('model') as
-                | 'gpt-image-1'
-                | 'gpt-image-1-mini'
-                | 'gpt-image-1.5'
-                | 'gpt-image-2'
-                | null) || 'gpt-image-2';
+        const model = ((formData.get('model') as string | null)?.trim() || 'gpt-image-2') as
+            | OpenAI.Images.ImageGenerateParams['model']
+            | OpenAI.Images.ImageEditParams['model'];
 
         console.log(`Mode: ${mode}, Model: ${model}, Prompt: ${prompt ? prompt.substring(0, 50) + '...' : 'N/A'}`);
 
@@ -271,7 +277,7 @@ export async function POST(request: NextRequest) {
                     headers: {
                         'Content-Type': 'text/event-stream',
                         'Cache-Control': 'no-cache',
-                        'Connection': 'keep-alive'
+                        Connection: 'keep-alive'
                     }
                 });
             }
@@ -415,7 +421,7 @@ export async function POST(request: NextRequest) {
                     headers: {
                         'Content-Type': 'text/event-stream',
                         'Cache-Control': 'no-cache',
-                        'Connection': 'keep-alive'
+                        Connection: 'keep-alive'
                     }
                 });
             }

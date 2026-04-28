@@ -33,7 +33,21 @@ const GPT_IMAGE_2_TEXT_INPUT_COST_PER_TOKEN = 0.000005; // $5.00/1M
 const GPT_IMAGE_2_IMAGE_INPUT_COST_PER_TOKEN = 0.000008; // $8.00/1M
 const GPT_IMAGE_2_IMAGE_OUTPUT_COST_PER_TOKEN = 0.00003; // $30.00/1M
 
-export type GptImageModel = 'gpt-image-1' | 'gpt-image-1-mini' | 'gpt-image-1.5' | 'gpt-image-2';
+export type GptImageModel = string;
+
+export const USD_TO_CNY_RATE = 6.83;
+export const SITE_IMAGES_PER_CNY = 20;
+export const SITE_CNY_PER_IMAGE = 1 / SITE_IMAGES_PER_CNY;
+
+export type SiteValueComparison = {
+    officialCostCny: number;
+    siteCostCny: number;
+    officialCostPerImageCny: number;
+    siteCostPerImageCny: number;
+    savingsCny: number;
+    savingsPercent: number;
+    valueMultiplier: number;
+};
 
 export type ModelRates = {
     textInputPerToken: number;
@@ -82,6 +96,52 @@ export function getModelRates(model: GptImageModel): ModelRates {
         textInputPerMillion: 5,
         imageInputPerMillion: 10,
         imageOutputPerMillion: 40
+    };
+}
+
+export function usdToCny(usd: number): number {
+    return usd * USD_TO_CNY_RATE;
+}
+
+export function formatUsdCny(usd: number, fractionDigits = 4): string {
+    if (!Number.isFinite(usd)) {
+        return 'N/A';
+    }
+
+    return `$${usd.toFixed(fractionDigits)} / \u00a5${usdToCny(usd).toFixed(fractionDigits)}`;
+}
+
+export function formatCny(usd: number, fractionDigits = 4): string {
+    if (!Number.isFinite(usd)) {
+        return 'N/A';
+    }
+
+    return formatCnyAmount(usdToCny(usd), fractionDigits);
+}
+
+export function formatCnyAmount(cny: number, fractionDigits = 4): string {
+    if (!Number.isFinite(cny)) {
+        return 'N/A';
+    }
+
+    return `\u00a5${cny.toFixed(fractionDigits)}`;
+}
+
+export function calculateSiteValueComparison(officialUsdCost: number, imageCount: number): SiteValueComparison {
+    const safeImageCount = Math.max(0, imageCount);
+    const officialCostCny = usdToCny(officialUsdCost);
+    const siteCostCny = safeImageCount * SITE_CNY_PER_IMAGE;
+    const officialCostPerImageCny = safeImageCount > 0 ? officialCostCny / safeImageCount : 0;
+    const savingsCny = officialCostCny - siteCostCny;
+
+    return {
+        officialCostCny,
+        siteCostCny,
+        officialCostPerImageCny,
+        siteCostPerImageCny: SITE_CNY_PER_IMAGE,
+        savingsCny,
+        savingsPercent: officialCostCny > 0 ? (savingsCny / officialCostCny) * 100 : 0,
+        valueMultiplier: siteCostCny > 0 ? officialCostCny / siteCostCny : 0
     };
 }
 

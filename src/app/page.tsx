@@ -4,12 +4,18 @@ import { EditingForm, type EditingFormData } from '@/components/editing-form';
 import { GenerationForm, type GenerationFormData } from '@/components/generation-form';
 import { HistoryPanel } from '@/components/history-panel';
 import { ImageOutput } from '@/components/image-output';
+import { LanguageSelect } from '@/components/language-select';
 import { PasswordDialog } from '@/components/password-dialog';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
+import { Button } from '@/components/ui/button';
+import { defaultApiBaseUrl, useAppSettings } from '@/lib/app-settings';
 import { calculateApiCost, type CostDetails, type GptImageModel } from '@/lib/cost-utils';
-import { getPresetDimensions } from '@/lib/size-utils';
 import { db, type ImageRecord } from '@/lib/db';
+import { useI18n } from '@/lib/i18n';
+import { getPresetDimensions } from '@/lib/size-utils';
 import { useLiveQuery } from 'dexie-react-hooks';
+import { Settings } from 'lucide-react';
+import Link from 'next/link';
 import * as React from 'react';
 
 type HistoryImage = {
@@ -27,6 +33,12 @@ export type HistoryMetadata = {
     prompt: string;
     mode: 'generate' | 'edit';
     costDetails: CostDetails | null;
+    size?: string;
+    output_compression?: number;
+    streaming?: boolean;
+    partialImages?: number;
+    sourceImageCount?: number;
+    hasMask?: boolean;
     output_format?: GenerationFormData['output_format'];
     model?: GptImageModel;
 };
@@ -67,11 +79,15 @@ type ApiImageResponseItem = {
 };
 
 export default function HomePage() {
+    const { t } = useI18n();
+    const { settings, modelOptions } = useAppSettings();
     const [mode, setMode] = React.useState<'generate' | 'edit'>('generate');
     const [isPasswordRequiredByBackend, setIsPasswordRequiredByBackend] = React.useState<boolean | null>(null);
     const [clientPasswordHash, setClientPasswordHash] = React.useState<string | null>(null);
     const [isLoading, setIsLoading] = React.useState(false);
     const [isSendingToEdit, setIsSendingToEdit] = React.useState(false);
+    const [activeRequestStartedAt, setActiveRequestStartedAt] = React.useState<number | null>(null);
+    const [elapsedSeconds, setElapsedSeconds] = React.useState(0);
     const [error, setError] = React.useState<string | null>(null);
     const [latestImageBatch, setLatestImageBatch] = React.useState<{ path: string; filename: string }[] | null>(null);
     const [imageOutputView, setImageOutputView] = React.useState<'grid' | number>('grid');
@@ -91,7 +107,7 @@ export default function HomePage() {
     const [editSourceImagePreviewUrls, setEditSourceImagePreviewUrls] = React.useState<string[]>([]);
     const [editPrompt, setEditPrompt] = React.useState('');
     const [editN, setEditN] = React.useState([1]);
-    const [editSize, setEditSize] = React.useState<EditingFormData['size']>('auto');
+    const [editSize, setEditSize] = React.useState<EditingFormData['size']>('square');
     const [editCustomWidth, setEditCustomWidth] = React.useState<number>(1024);
     const [editCustomHeight, setEditCustomHeight] = React.useState<number>(1024);
     const [editQuality, setEditQuality] = React.useState<EditingFormData['quality']>('auto');
@@ -108,7 +124,7 @@ export default function HomePage() {
     const [genModel, setGenModel] = React.useState<GenerationFormData['model']>('gpt-image-2');
     const [genPrompt, setGenPrompt] = React.useState('');
     const [genN, setGenN] = React.useState([1]);
-    const [genSize, setGenSize] = React.useState<GenerationFormData['size']>('auto');
+    const [genSize, setGenSize] = React.useState<GenerationFormData['size']>('square');
     const [genCustomWidth, setGenCustomWidth] = React.useState<number>(1024);
     const [genCustomHeight, setGenCustomHeight] = React.useState<number>(1024);
     const [genQuality, setGenQuality] = React.useState<GenerationFormData['quality']>('auto');
@@ -118,12 +134,40 @@ export default function HomePage() {
     const [genModeration, setGenModeration] = React.useState<GenerationFormData['moderation']>('auto');
 
     const [editModel, setEditModel] = React.useState<EditingFormData['model']>('gpt-image-2');
+    const fallbackModel = modelOptions[0] ?? 'gpt-image-2';
 
     // Streaming state (shared between generate and edit modes)
     const [enableStreaming, setEnableStreaming] = React.useState(false);
     const [partialImages, setPartialImages] = React.useState<1 | 2 | 3>(2);
     // Streaming preview images (base64 data URLs for partial images during streaming)
     const [streamingPreviewImages, setStreamingPreviewImages] = React.useState<Map<number, string>>(new Map());
+
+    React.useEffect(() => {
+        if (!modelOptions.includes(genModel)) {
+            setGenModel(fallbackModel);
+        }
+    }, [fallbackModel, genModel, modelOptions]);
+
+    React.useEffect(() => {
+        if (!modelOptions.includes(editModel)) {
+            setEditModel(fallbackModel);
+        }
+    }, [editModel, fallbackModel, modelOptions]);
+
+    React.useEffect(() => {
+        if (!isLoading || activeRequestStartedAt === null) {
+            return;
+        }
+
+        const updateElapsedSeconds = () => {
+            setElapsedSeconds(Math.floor((Date.now() - activeRequestStartedAt) / 1000));
+        };
+
+        updateElapsedSeconds();
+        const intervalId = window.setInterval(updateElapsedSeconds, 1000);
+
+        return () => window.clearInterval(intervalId);
+    }, [activeRequestStartedAt, isLoading]);
 
     const getImageSrc = React.useCallback(
         (filename: string): string | undefined => {
@@ -233,7 +277,7 @@ export default function HomePage() {
             }
 
             if (editImageFiles.length >= MAX_EDIT_IMAGES) {
-                alert(`Cannot paste: Maximum of ${MAX_EDIT_IMAGES} images reached.`);
+                alert(t('form.invalidMaxFiles', { maxImages: MAX_EDIT_IMAGES }));
                 return;
             }
 
@@ -260,7 +304,7 @@ export default function HomePage() {
         return () => {
             window.removeEventListener('paste', handlePaste);
         };
-    }, [mode, editImageFiles.length]);
+    }, [mode, editImageFiles.length, t]);
 
     async function sha256Client(text: string): Promise<string> {
         const encoder = new TextEncoder();
@@ -273,7 +317,7 @@ export default function HomePage() {
 
     const handleSavePassword = async (password: string) => {
         if (!password.trim()) {
-            setError('Password cannot be empty.');
+            setError(t('page.passwordEmpty'));
             return;
         }
         try {
@@ -287,7 +331,7 @@ export default function HomePage() {
             }
         } catch (e) {
             console.error('Error hashing password:', e);
-            setError('Failed to save password due to a hashing error.');
+            setError(t('page.passwordHashError'));
         }
     };
 
@@ -308,16 +352,26 @@ export default function HomePage() {
         let durationMs = 0;
 
         setIsLoading(true);
+        setActiveRequestStartedAt(startTime);
+        setElapsedSeconds(0);
         setError(null);
         setLatestImageBatch(null);
         setImageOutputView('grid');
         setStreamingPreviewImages(new Map());
 
         const apiFormData = new FormData();
+        const apiKey = settings.apiKey.trim();
+        const baseUrl = settings.baseUrl.trim() || defaultApiBaseUrl;
+
+        if (apiKey) {
+            apiFormData.append('apiKey', apiKey);
+        }
+        apiFormData.append('baseUrl', baseUrl);
+
         if (isPasswordRequiredByBackend && clientPasswordHash) {
             apiFormData.append('passwordHash', clientPasswordHash);
         } else if (isPasswordRequiredByBackend && !clientPasswordHash) {
-            setError('Password is required. Please configure the password by clicking the lock icon.');
+            setError(t('page.passwordMissing'));
             setPasswordDialogContext('initial');
             setIsPasswordDialogOpen(true);
             setIsLoading(false);
@@ -331,6 +385,11 @@ export default function HomePage() {
             apiFormData.append('partial_images', partialImages.toString());
         }
 
+        let requestSize = '';
+        let requestOutputCompression: number | undefined;
+        let requestSourceImageCount = 0;
+        let requestHasMask = false;
+
         if (mode === 'generate') {
             const genData = formData as GenerationFormData;
             apiFormData.append('model', genModel);
@@ -340,6 +399,7 @@ export default function HomePage() {
                 genSize === 'custom'
                     ? `${genCustomWidth}x${genCustomHeight}`
                     : (getPresetDimensions(genSize, genModel) ?? genSize);
+            requestSize = genSizeToSend;
             apiFormData.append('size', genSizeToSend);
             apiFormData.append('quality', genQuality);
             apiFormData.append('output_format', genOutputFormat);
@@ -347,6 +407,7 @@ export default function HomePage() {
                 (genOutputFormat === 'jpeg' || genOutputFormat === 'webp') &&
                 genData.output_compression !== undefined
             ) {
+                requestOutputCompression = genData.output_compression;
                 apiFormData.append('output_compression', genData.output_compression.toString());
             }
             apiFormData.append('background', genBackground);
@@ -359,6 +420,9 @@ export default function HomePage() {
                 editSize === 'custom'
                     ? `${editCustomWidth}x${editCustomHeight}`
                     : (getPresetDimensions(editSize, editModel) ?? editSize);
+            requestSize = editSizeToSend;
+            requestSourceImageCount = editImageFiles.length;
+            requestHasMask = !!editGeneratedMaskFile;
             apiFormData.append('size', editSizeToSend);
             apiFormData.append('quality', editQuality);
 
@@ -380,7 +444,7 @@ export default function HomePage() {
             const contentType = response.headers.get('content-type');
             if (contentType?.includes('text/event-stream')) {
                 if (!response.body) {
-                    throw new Error('Response body is null');
+                    throw new Error(t('page.unexpectedError'));
                 }
 
                 const reader = response.body.getReader();
@@ -413,7 +477,7 @@ export default function HomePage() {
                                         return newMap;
                                     });
                                 } else if (event.type === 'error') {
-                                    throw new Error(event.error || 'Streaming error occurred');
+                                    throw new Error(event.error || t('page.streamingError'));
                                 } else if (event.type === 'done') {
                                     // Finalize with all completed images
                                     durationMs = Date.now() - startTime;
@@ -457,48 +521,62 @@ export default function HomePage() {
                                             prompt: historyPrompt,
                                             mode: mode,
                                             costDetails: costDetails,
-                                            model: currentModel
+                                            model: currentModel,
+                                            size: requestSize,
+                                            output_compression: requestOutputCompression,
+                                            streaming: enableStreaming,
+                                            partialImages: enableStreaming ? partialImages : undefined,
+                                            sourceImageCount: requestSourceImageCount,
+                                            hasMask: requestHasMask
                                         };
 
-                                        let newImageBatchPromises: Promise<{ path: string; filename: string } | null>[] =
-                                            [];
+                                        let newImageBatchPromises: Promise<{
+                                            path: string;
+                                            filename: string;
+                                        } | null>[] = [];
                                         if (effectiveStorageModeClient === 'indexeddb') {
-                                            newImageBatchPromises = event.images.map(async (img: ApiImageResponseItem) => {
-                                                if (img.b64_json) {
-                                                    try {
-                                                        const byteCharacters = atob(img.b64_json);
-                                                        const byteNumbers = new Array(byteCharacters.length);
-                                                        for (let i = 0; i < byteCharacters.length; i++) {
-                                                            byteNumbers[i] = byteCharacters.charCodeAt(i);
+                                            newImageBatchPromises = event.images.map(
+                                                async (img: ApiImageResponseItem) => {
+                                                    if (img.b64_json) {
+                                                        try {
+                                                            const byteCharacters = atob(img.b64_json);
+                                                            const byteNumbers = new Array(byteCharacters.length);
+                                                            for (let i = 0; i < byteCharacters.length; i++) {
+                                                                byteNumbers[i] = byteCharacters.charCodeAt(i);
+                                                            }
+                                                            const byteArray = new Uint8Array(byteNumbers);
+
+                                                            const actualMimeType = getMimeTypeFromFormat(
+                                                                img.output_format
+                                                            );
+                                                            const blob = new Blob([byteArray], {
+                                                                type: actualMimeType
+                                                            });
+
+                                                            await db.images.put({ filename: img.filename, blob });
+
+                                                            const blobUrl = URL.createObjectURL(blob);
+                                                            blobUrlCacheRef.current.set(img.filename, blobUrl);
+
+                                                            return { filename: img.filename, path: blobUrl };
+                                                        } catch (dbError) {
+                                                            console.error(
+                                                                `Error saving blob ${img.filename} to IndexedDB:`,
+                                                                dbError
+                                                            );
+                                                            setError(
+                                                                t('page.saveIndexedDbError', { filename: img.filename })
+                                                            );
+                                                            return null;
                                                         }
-                                                        const byteArray = new Uint8Array(byteNumbers);
-
-                                                        const actualMimeType = getMimeTypeFromFormat(img.output_format);
-                                                        const blob = new Blob([byteArray], { type: actualMimeType });
-
-                                                        await db.images.put({ filename: img.filename, blob });
-
-                                                        const blobUrl = URL.createObjectURL(blob);
-                                                        blobUrlCacheRef.current.set(img.filename, blobUrl);
-
-                                                        return { filename: img.filename, path: blobUrl };
-                                                    } catch (dbError) {
-                                                        console.error(
-                                                            `Error saving blob ${img.filename} to IndexedDB:`,
-                                                            dbError
-                                                        );
-                                                        setError(
-                                                            `Failed to save image ${img.filename} to local database.`
+                                                    } else {
+                                                        console.warn(
+                                                            `Image ${img.filename} missing b64_json in indexeddb mode.`
                                                         );
                                                         return null;
                                                     }
-                                                } else {
-                                                    console.warn(
-                                                        `Image ${img.filename} missing b64_json in indexeddb mode.`
-                                                    );
-                                                    return null;
                                                 }
-                                            });
+                                            );
                                         } else {
                                             newImageBatchPromises = event.images
                                                 .filter((img: ApiImageResponseItem) => !!img.path)
@@ -539,14 +617,14 @@ export default function HomePage() {
 
             if (!response.ok) {
                 if (response.status === 401 && isPasswordRequiredByBackend) {
-                    setError('Unauthorized: Invalid or missing password. Please try again.');
+                    setError(t('page.unauthorized'));
                     setPasswordDialogContext('retry');
                     setLastApiCallArgs([formData]);
                     setIsPasswordDialogOpen(true);
 
                     return;
                 }
-                throw new Error(result.error || `API request failed with status ${response.status}`);
+                throw new Error(result.error || t('page.apiRequestFailed', { status: response.status }));
             }
 
             if (result.images && result.images.length > 0) {
@@ -588,7 +666,13 @@ export default function HomePage() {
                     prompt: historyPrompt,
                     mode: mode,
                     costDetails: costDetails,
-                    model: currentModel
+                    model: currentModel,
+                    size: requestSize,
+                    output_compression: requestOutputCompression,
+                    streaming: enableStreaming,
+                    partialImages: enableStreaming ? partialImages : undefined,
+                    sourceImageCount: requestSourceImageCount,
+                    hasMask: requestHasMask
                 };
 
                 let newImageBatchPromises: Promise<{ path: string; filename: string } | null>[] = [];
@@ -614,7 +698,7 @@ export default function HomePage() {
                                 return { filename: img.filename, path: blobUrl };
                             } catch (dbError) {
                                 console.error(`Error saving blob ${img.filename} to IndexedDB:`, dbError);
-                                setError(`Failed to save image ${img.filename} to local database.`);
+                                setError(t('page.saveIndexedDbError', { filename: img.filename }));
                                 return null;
                             }
                         } else {
@@ -644,18 +728,19 @@ export default function HomePage() {
                 setHistory((prevHistory) => [newHistoryEntry, ...prevHistory]);
             } else {
                 setLatestImageBatch(null);
-                throw new Error('API response did not contain valid image data or filenames.');
+                throw new Error(t('page.apiNoImages'));
             }
         } catch (err: unknown) {
             durationMs = Date.now() - startTime;
             console.error(`API Call Error after ${durationMs}ms:`, err);
-            const errorMessage = err instanceof Error ? err.message : 'An unexpected error occurred.';
+            const errorMessage = err instanceof Error ? err.message : t('page.unexpectedError');
             setError(errorMessage);
             setLatestImageBatch(null);
             setStreamingPreviewImages(new Map());
         } finally {
             if (durationMs === 0) durationMs = Date.now() - startTime;
             setIsLoading(false);
+            setActiveRequestStartedAt(null);
         }
     };
 
@@ -677,7 +762,7 @@ export default function HomePage() {
                     console.warn(
                         `Could not get image source for history item: ${imgInfo.filename} (mode: ${originalStorageMode})`
                     );
-                    setError(`Image ${imgInfo.filename} could not be loaded.`);
+                    setError(t('page.historyImageLoadError', { filename: imgInfo.filename }));
                     return null;
                 }
             });
@@ -686,9 +771,7 @@ export default function HomePage() {
                 const validImages = resolvedBatch.filter(Boolean) as { path: string; filename: string }[];
 
                 if (validImages.length !== item.images.length) {
-                    setError(
-                        'Some images from this history entry could not be loaded (they might have been cleared or are missing).'
-                    );
+                    setError(t('page.historyImagesLoadSomeError'));
                 } else {
                     setError(null);
                 }
@@ -697,14 +780,14 @@ export default function HomePage() {
                 setImageOutputView(validImages.length > 1 ? 'grid' : 0);
             });
         },
-        [getImageSrc]
+        [getImageSrc, t]
     );
 
     const handleClearHistory = React.useCallback(async () => {
         const confirmationMessage =
             effectiveStorageModeClient === 'indexeddb'
-                ? 'Are you sure you want to clear the entire image history? In IndexedDB mode, this will also permanently delete all stored images. This cannot be undone.'
-                : 'Are you sure you want to clear the entire image history? This cannot be undone.';
+                ? t('history.clearConfirmIndexedDb')
+                : t('history.clearConfirmFs');
 
         if (window.confirm(confirmationMessage)) {
             setHistory([]);
@@ -722,10 +805,10 @@ export default function HomePage() {
                 }
             } catch (e) {
                 console.error('Failed during history clearing:', e);
-                setError(`Failed to clear history: ${e instanceof Error ? e.message : String(e)}`);
+                setError(t('page.clearHistoryError', { message: e instanceof Error ? e.message : String(e) }));
             }
         }
-    }, []);
+    }, [t]);
 
     const handleSendToEdit = async (filename: string) => {
         if (isSendingToEdit) return;
@@ -739,7 +822,7 @@ export default function HomePage() {
         }
 
         if (mode === 'edit' && editImageFiles.length >= MAX_EDIT_IMAGES) {
-            setError(`Cannot add more than ${MAX_EDIT_IMAGES} images to the edit form.`);
+            setError(t('page.editFormMaxImages', { maxImages: MAX_EDIT_IMAGES }));
             setIsSendingToEdit(false);
             return;
         }
@@ -754,19 +837,19 @@ export default function HomePage() {
                     blob = record.blob;
                     mimeType = blob.type || mimeType;
                 } else {
-                    throw new Error(`Image ${filename} not found in local database.`);
+                    throw new Error(t('page.imageNotFoundLocal', { filename }));
                 }
             } else {
                 const response = await fetch(`/api/image/${filename}`);
                 if (!response.ok) {
-                    throw new Error(`Failed to fetch image: ${response.statusText}`);
+                    throw new Error(t('page.fetchImageFailed', { statusText: response.statusText }));
                 }
                 blob = await response.blob();
                 mimeType = response.headers.get('Content-Type') || mimeType;
             }
 
             if (!blob) {
-                throw new Error(`Could not retrieve image data for ${filename}.`);
+                throw new Error(t('page.retrieveImageFailed', { filename }));
             }
 
             const newFile = new File([blob], filename, { type: mimeType });
@@ -782,7 +865,7 @@ export default function HomePage() {
             }
         } catch (err: unknown) {
             console.error('Error sending image to edit:', err);
-            const errorMessage = err instanceof Error ? err.message : 'Failed to send image to edit form.';
+            const errorMessage = err instanceof Error ? err.message : t('page.sendToEditError');
             setError(errorMessage);
         } finally {
             setIsSendingToEdit(false);
@@ -821,7 +904,7 @@ export default function HomePage() {
 
                     const result = await response.json();
                     if (!response.ok) {
-                        throw new Error(result.error || `API deletion failed with status ${response.status}`);
+                        throw new Error(result.error || t('page.deleteApiFailed', { status: response.status }));
                     }
                 }
 
@@ -831,12 +914,12 @@ export default function HomePage() {
                 );
             } catch (e: unknown) {
                 console.error('Error during item deletion:', e);
-                setError(e instanceof Error ? e.message : 'An unexpected error occurred during deletion.');
+                setError(e instanceof Error ? e.message : t('page.unexpectedDeleteError'));
             } finally {
                 setItemToDeleteConfirm(null);
             }
         },
-        [isPasswordRequiredByBackend, clientPasswordHash]
+        [isPasswordRequiredByBackend, clientPasswordHash, t]
     );
 
     const handleRequestDeleteItem = React.useCallback(
@@ -868,13 +951,23 @@ export default function HomePage() {
                 isOpen={isPasswordDialogOpen}
                 onOpenChange={setIsPasswordDialogOpen}
                 onSave={handleSavePassword}
-                title={passwordDialogContext === 'retry' ? 'Password Required' : 'Configure Password'}
+                title={passwordDialogContext === 'retry' ? t('page.passwordRequired') : t('page.configurePassword')}
                 description={
                     passwordDialogContext === 'retry'
-                        ? 'The server requires a password, or the previous one was incorrect. Please enter it to continue.'
-                        : 'Set a password to use for API requests.'
+                        ? t('page.passwordRequiredDescription')
+                        : t('page.setPasswordDescription')
                 }
             />
+            <LanguageSelect />
+            <Button
+                asChild
+                variant='outline'
+                className='fixed top-4 right-4 z-40 border-white/20 bg-black/90 text-white/80 shadow-lg backdrop-blur hover:bg-white/10 hover:text-white'>
+                <Link href='/settings' aria-label={t('settings.title')}>
+                    <Settings className='h-4 w-4' />
+                    <span className='hidden sm:inline'>{t('settings.title')}</span>
+                </Link>
+            </Button>
             <div className='w-full max-w-screen-2xl space-y-6'>
                 <div className='grid grid-cols-1 gap-6 lg:grid-cols-2'>
                     <div className='relative flex h-[70vh] min-h-[600px] flex-col lg:col-span-1'>
@@ -889,6 +982,7 @@ export default function HomePage() {
                                 onOpenPasswordDialog={handleOpenPasswordDialog}
                                 model={genModel}
                                 setModel={setGenModel}
+                                modelOptions={modelOptions}
                                 prompt={genPrompt}
                                 setPrompt={setGenPrompt}
                                 n={genN}
@@ -926,6 +1020,7 @@ export default function HomePage() {
                                 onOpenPasswordDialog={handleOpenPasswordDialog}
                                 editModel={editModel}
                                 setEditModel={setEditModel}
+                                modelOptions={modelOptions}
                                 imageFiles={editImageFiles}
                                 sourceImagePreviewUrls={editSourceImagePreviewUrls}
                                 setImageFiles={setEditImageFiles}
@@ -967,7 +1062,7 @@ export default function HomePage() {
                     <div className='flex h-[70vh] min-h-[600px] flex-col lg:col-span-1'>
                         {error && (
                             <Alert variant='destructive' className='mb-4 border-red-500/50 bg-red-900/20 text-red-300'>
-                                <AlertTitle className='text-red-200'>Error</AlertTitle>
+                                <AlertTitle className='text-red-200'>{t('common.error')}</AlertTitle>
                                 <AlertDescription>{error}</AlertDescription>
                             </Alert>
                         )}
@@ -975,8 +1070,9 @@ export default function HomePage() {
                             imageBatch={latestImageBatch}
                             viewMode={imageOutputView}
                             onViewChange={setImageOutputView}
-                            altText='Generated image output'
+                            altText={t('output.generatedAlt')}
                             isLoading={isLoading || isSendingToEdit}
+                            elapsedSeconds={elapsedSeconds}
                             onSendToEdit={handleSendToEdit}
                             currentMode={mode}
                             baseImagePreviewUrl={editSourceImagePreviewUrls[0] || null}

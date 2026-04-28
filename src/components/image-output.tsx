@@ -1,9 +1,12 @@
 'use client';
 
+import { ImagePreviewDialog, type PreviewImage } from '@/components/image-preview-dialog';
 import { Button } from '@/components/ui/button';
+import { useI18n } from '@/lib/i18n';
 import { cn } from '@/lib/utils';
-import { Loader2, Send, Grid } from 'lucide-react';
+import { Download, Grid, Loader2, Send } from 'lucide-react';
 import Image from 'next/image';
+import * as React from 'react';
 
 type ImageInfo = {
     path: string;
@@ -16,6 +19,7 @@ type ImageOutputProps = {
     onViewChange: (view: 'grid' | number) => void;
     altText?: string;
     isLoading: boolean;
+    elapsedSeconds: number;
     onSendToEdit: (filename: string) => void;
     currentMode: 'generate' | 'edit';
     baseImagePreviewUrl: string | null;
@@ -29,17 +33,30 @@ const getGridColsClass = (count: number): string => {
     return 'grid-cols-3';
 };
 
+const formatElapsedTime = (elapsedSeconds: number): string => {
+    const minutes = Math.floor(elapsedSeconds / 60);
+    const seconds = elapsedSeconds % 60;
+
+    return `${minutes}:${seconds.toString().padStart(2, '0')}`;
+};
+
 export function ImageOutput({
     imageBatch,
     viewMode,
     onViewChange,
     altText = 'Generated image output',
     isLoading,
+    elapsedSeconds,
     onSendToEdit,
     currentMode,
     baseImagePreviewUrl,
     streamingPreviewImages
 }: ImageOutputProps) {
+    const { t } = useI18n();
+    const [previewImage, setPreviewImage] = React.useState<PreviewImage | null>(null);
+    const elapsedLabel = t('output.elapsed', { time: formatElapsedTime(elapsedSeconds) });
+    const selectedImage = typeof viewMode === 'number' && imageBatch ? imageBatch[viewMode] : null;
+
     const handleSendClick = () => {
         // Send to edit only works when a single image is selected
         if (typeof viewMode === 'number' && imageBatch && imageBatch[viewMode]) {
@@ -47,12 +64,33 @@ export function ImageOutput({
         }
     };
 
+    const openPreview = (img: ImageInfo, index?: number) => {
+        setPreviewImage({
+            src: img.path,
+            filename: img.filename,
+            alt:
+                index === undefined
+                    ? altText
+                    : t('output.generatedGridAlt', {
+                          index: index + 1
+                      })
+        });
+    };
+
     const showCarousel = imageBatch && imageBatch.length > 1;
     const isSingleImageView = typeof viewMode === 'number';
     const canSendToEdit = !isLoading && isSingleImageView && imageBatch && imageBatch[viewMode];
+    const singleActionClass = showCarousel && viewMode === 'grid' ? 'invisible' : 'visible';
 
     return (
         <div className='flex h-full min-h-[300px] w-full flex-col items-center justify-between gap-4 overflow-hidden rounded-lg border border-white/20 bg-black p-4'>
+            <ImagePreviewDialog
+                image={previewImage}
+                open={!!previewImage}
+                onOpenChange={(open) => {
+                    if (!open) setPreviewImage(null);
+                }}
+            />
             <div className='relative flex h-full w-full flex-grow items-center justify-center overflow-hidden'>
                 {isLoading ? (
                     streamingPreviewImages && streamingPreviewImages.size > 0 ? (
@@ -67,7 +105,7 @@ export function ImageOutput({
                                 return (
                                     <Image
                                         src={dataUrl}
-                                        alt='Streaming preview'
+                                        alt={t('output.streamingPreviewAlt')}
                                         width={512}
                                         height={512}
                                         className='max-h-full max-w-full object-contain'
@@ -78,14 +116,16 @@ export function ImageOutput({
                             {/* Overlay loader at bottom center */}
                             <div className='absolute bottom-4 left-1/2 flex -translate-x-1/2 items-center gap-2 rounded-full bg-black/70 px-3 py-1.5 text-white/80'>
                                 <Loader2 className='h-4 w-4 animate-spin' />
-                                <p className='text-sm'>Streaming...</p>
+                                <p className='text-sm'>
+                                    {t('output.streaming')} - {elapsedLabel}
+                                </p>
                             </div>
                         </div>
                     ) : currentMode === 'edit' && baseImagePreviewUrl ? (
                         <div className='relative flex h-full w-full items-center justify-center'>
                             <Image
                                 src={baseImagePreviewUrl}
-                                alt='Base image for editing'
+                                alt={t('output.baseEditAlt')}
                                 fill
                                 style={{ objectFit: 'contain' }}
                                 className='blur-md filter'
@@ -93,13 +133,15 @@ export function ImageOutput({
                             />
                             <div className='absolute inset-0 flex flex-col items-center justify-center bg-black/50 text-white/80'>
                                 <Loader2 className='mb-2 h-8 w-8 animate-spin' />
-                                <p>Editing image...</p>
+                                <p>{t('output.editing')}</p>
+                                <p className='mt-1 text-sm text-white/60'>{elapsedLabel}</p>
                             </div>
                         </div>
                     ) : (
                         <div className='flex flex-col items-center justify-center text-white/60'>
                             <Loader2 className='mb-2 h-8 w-8 animate-spin' />
-                            <p>Generating image...</p>
+                            <p>{t('output.generating')}</p>
+                            <p className='mt-1 text-sm text-white/50'>{elapsedLabel}</p>
                         </div>
                     )
                 ) : imageBatch && imageBatch.length > 0 ? (
@@ -110,34 +152,59 @@ export function ImageOutput({
                                 <div
                                     key={img.filename}
                                     className='relative aspect-square overflow-hidden rounded border border-white/10'>
-                                    <Image
-                                        src={img.path}
-                                        alt={`Generated image ${index + 1}`}
-                                        fill
-                                        style={{ objectFit: 'contain' }}
-                                        sizes='(max-width: 768px) 50vw, (max-width: 1024px) 33vw, 25vw'
-                                        unoptimized
-                                    />
+                                    <button
+                                        type='button'
+                                        className='relative h-full w-full cursor-zoom-in'
+                                        onClick={() => openPreview(img, index)}
+                                        aria-label={t('output.previewImageAria', { filename: img.filename })}>
+                                        <Image
+                                            src={img.path}
+                                            alt={t('output.generatedGridAlt', { index: index + 1 })}
+                                            fill
+                                            style={{ objectFit: 'contain' }}
+                                            sizes='(max-width: 768px) 50vw, (max-width: 1024px) 33vw, 25vw'
+                                            unoptimized
+                                        />
+                                    </button>
+                                    <Button
+                                        asChild
+                                        variant='ghost'
+                                        size='icon'
+                                        className='absolute right-1 bottom-1 z-10 h-7 w-7 rounded-full bg-black/70 text-white/80 hover:bg-black/90 hover:text-white'>
+                                        <a
+                                            href={img.path}
+                                            download={img.filename}
+                                            onClick={(event) => event.stopPropagation()}
+                                            aria-label={t('output.downloadImageAria', { filename: img.filename })}>
+                                            <Download className='h-4 w-4' />
+                                        </a>
+                                    </Button>
                                 </div>
                             ))}
                         </div>
                     ) : imageBatch[viewMode] ? (
-                        <Image
-                            src={imageBatch[viewMode].path}
-                            alt={altText}
-                            width={512}
-                            height={512}
-                            className='max-h-full max-w-full object-contain'
-                            unoptimized
-                        />
+                        <button
+                            type='button'
+                            className='flex h-full w-full cursor-zoom-in items-center justify-center'
+                            onClick={() => openPreview(imageBatch[viewMode])}
+                            aria-label={t('output.previewImageAria', { filename: imageBatch[viewMode].filename })}>
+                            <Image
+                                src={imageBatch[viewMode].path}
+                                alt={altText}
+                                width={512}
+                                height={512}
+                                className='max-h-full max-w-full object-contain'
+                                unoptimized
+                            />
+                        </button>
                     ) : (
                         <div className='text-center text-white/40'>
-                            <p>Error displaying image.</p>
+                            <p>{t('output.displayError')}</p>
                         </div>
                     )
                 ) : (
                     <div className='text-center text-white/40'>
-                        <p>Your generated image will appear here.</p>
+                        <p>{t('output.empty')}</p>
                     </div>
                 )}
             </div>
@@ -155,7 +222,7 @@ export function ImageOutput({
                                     : 'text-white/50 hover:bg-white/10 hover:text-white/80'
                             )}
                             onClick={() => onViewChange('grid')}
-                            aria-label='Show grid view'>
+                            aria-label={t('output.gridAria')}>
                             <Grid className='h-4 w-4' />
                         </Button>
                         {imageBatch.map((img, index) => (
@@ -170,10 +237,10 @@ export function ImageOutput({
                                         : 'opacity-60 hover:opacity-100'
                                 )}
                                 onClick={() => onViewChange(index)}
-                                aria-label={`Select image ${index + 1}`}>
+                                aria-label={t('output.selectImageAria', { index: index + 1 })}>
                                 <Image
                                     src={img.path}
-                                    alt={`Thumbnail ${index + 1}`}
+                                    alt={t('output.thumbnailAlt', { index: index + 1 })}
                                     width={28}
                                     height={28}
                                     className='h-full w-full object-cover'
@@ -184,6 +251,34 @@ export function ImageOutput({
                     </div>
                 )}
 
+                {selectedImage ? (
+                    <Button
+                        asChild
+                        variant='outline'
+                        size='sm'
+                        className={cn(
+                            'shrink-0 border-white/20 text-white/80 hover:bg-white/10 hover:text-white',
+                            singleActionClass
+                        )}>
+                        <a href={selectedImage.path} download={selectedImage.filename}>
+                            <Download className='mr-2 h-4 w-4' />
+                            {t('output.downloadImage')}
+                        </a>
+                    </Button>
+                ) : (
+                    <Button
+                        variant='outline'
+                        size='sm'
+                        disabled
+                        className={cn(
+                            'shrink-0 border-white/20 text-white/80 disabled:pointer-events-none disabled:opacity-50',
+                            singleActionClass
+                        )}>
+                        <Download className='mr-2 h-4 w-4' />
+                        {t('output.downloadImage')}
+                    </Button>
+                )}
+
                 <Button
                     variant='outline'
                     size='sm'
@@ -191,11 +286,10 @@ export function ImageOutput({
                     disabled={!canSendToEdit}
                     className={cn(
                         'shrink-0 border-white/20 text-white/80 hover:bg-white/10 hover:text-white disabled:pointer-events-none disabled:opacity-50',
-                        // Hide button completely if grid view is active and there are multiple images
-                        showCarousel && viewMode === 'grid' ? 'invisible' : 'visible'
+                        singleActionClass
                     )}>
                     <Send className='mr-2 h-4 w-4' />
-                    Send to Edit
+                    {t('output.sendToEdit')}
                 </Button>
             </div>
         </div>

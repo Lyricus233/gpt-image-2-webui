@@ -1,168 +1,194 @@
-# <img src="./public/favicon.svg" alt="Project Logo" width="30" height="30" style="vertical-align: middle; margin-right: 8px;"> GPT Image Playground
+<div align="center">
+  <img src="./public/favicon.svg" alt="GPT Image Playground" width="120" />
+  <h1>GPT Image Playground</h1>
+  <p>基于 Next.js 的 GPT Image 生成与编辑工作台</p>
+  <p>支持 OpenAI 兼容接口、图片生成、图片编辑、历史详情、成本估算、人民币换算与本站额度价值对比。</p>
+  <p>
+    <img src="https://img.shields.io/badge/Next.js-16-111827?style=for-the-badge&logo=nextdotjs&logoColor=white" alt="Next.js" />
+    <img src="https://img.shields.io/badge/React-19-149ECA?style=for-the-badge&logo=react&logoColor=white" alt="React" />
+    <img src="https://img.shields.io/badge/TailwindCSS-4-06B6D4?style=for-the-badge&logo=tailwindcss&logoColor=white" alt="Tailwind CSS" />
+  </p>
+  <p>
+    <img src="https://img.shields.io/badge/OpenAI-Compatible-111827?style=flat-square" alt="OpenAI Compatible" />
+    <img src="https://img.shields.io/badge/Default_Model-gpt--image--2-18A978?style=flat-square" alt="Default Model gpt-image-2" />
+    <img src="https://img.shields.io/badge/Base_URL-api.774966.xyz-1769E0?style=flat-square" alt="Default Base URL" />
+    <img src="https://img.shields.io/badge/Settings-localStorage-DF8D00?style=flat-square" alt="Settings localStorage" />
+  </p>
+</div>
 
-A web-based playground to interact with OpenAI's GPT image models (`gpt-image-2`, `gpt-image-1.5`, `gpt-image-1`, and `gpt-image-1-mini`) for generating and editing images.
+## 项目简介
 
-> **Note:** The playground defaults to `gpt-image-2`, OpenAI's latest GPT image model. It supports arbitrary resolutions up to 4K (with constraint validation) in addition to the legacy fixed sizes.
+GPT Image Playground 是一个面向 `gpt-image-2` 的图片生成与编辑页面。它默认使用 `https://api.774966.xyz/v1`，默认模型为 `gpt-image-2`，也可以在页面右上角的设置页里修改 Base URL、API Key 和模型列表。
 
-<p align="center">
-  <img src="./readme-images/interface.jpg" alt="Interface" width="600"/>
-</p>
-
-## ✨ Features
-
-*   **🎨 Image Generation Mode:** Create new images from text prompts.
-*   **🖌️ Image Editing Mode:** Modify existing images based on text prompts and optional masks.
-*   **⚙️ Full API Parameter Control:** Access and adjust all relevant parameters supported by the OpenAI Images API directly through the UI (size, quality, output format, compression, background, moderation, number of images).
-*   **📐 Custom Resolutions (gpt-image-2):** Pick from 2K/4K presets or enter an arbitrary Width × Height with live validation against the model's constraints (multiples of 16, max 3840px per edge, ≤ 3:1 aspect ratio, 655,360 to 8,294,400 total pixels).
-*   **🎭 Integrated Masking Tool:** Easily create or upload masks directly within the editing mode to specify areas for modification. Draw directly on the image to generate a mask.
-
-     > ⚠️ Please note that `gpt-image-1`'s masking feature does not guarantee 100% control at this time. <br>1) [It's a known & acknowledged model limitation.](https://community.openai.com/t/gpt-image-1-problems-with-mask-edits/1240639/37) <br>2) [OpenAI are looking to address it in a future update.](https://community.openai.com/t/gpt-image-1-problems-with-mask-edits/1240639/41)
-<p align="center">
-  <img src="./readme-images/mask-creation.jpg" alt="Interface" width="350"/>
-</p>
-
-*   **📜 Detailed History & Cost Tracking:**
-    *   View a comprehensive history of all your image generations and edits.
-    *   See the parameters used for each request.
-    *   Get detailed API token usage and estimated cost breakdowns (`$USD`) for each operation. (hint: click the `$` amount on the image)
-    *   View the full prompt used for each history item.
-    *   View total historical API cost.
-    *   Delete items from history
+设置内容只会保存在当前浏览器的 `localStorage` 中，不会做服务器持久化存储。发起生成或编辑时，浏览器会把当前配置发送给本应用后端接口，用于请求你配置的 OpenAI 兼容 API。
 
 <p align="center">
-  <img src="./readme-images/history.jpg" alt="Interface" width="1306"/>
+  <img src="./readme-images/interface.jpg" alt="主界面" width="900" />
 </p>
+
+## 功能特性
+
+- 图片生成：输入提示词生成图片，支持多图批量输出。
+- 图片编辑：上传或粘贴参考图，使用提示词进行编辑。
+- 蒙版工具：可在页面内绘制蒙版，也可以上传 PNG 蒙版。
+- 尺寸选择：默认 `1:1`，支持 `16:9`、`9:16` 和自定义尺寸。
+- 模型设置：可在设置页添加多个模型 ID，首页模型下拉框自动使用这些配置。
+- 接口设置：支持自定义 Base URL、API Key；Base URL 留空时默认使用 `https://api.774966.xyz/v1`。
+- 主题与语言：支持中文 / English，默认跟随系统语言；主题支持浅色、深色和跟随系统。
+- 实时计时：点击生成后会显示本次请求已耗时。
+- 图片预览与下载：生成结果、历史列表和详情页均支持下载图片。
+- 历史记录：历史元数据保存在浏览器 localStorage，图片可保存在服务端文件系统或浏览器 IndexedDB。
+- 历史详情页：查看图片、提示词、请求参数、耗时、模型、尺寸、格式、成本和额度对比。
+- 成本估算：按 API usage 和模型 token 单价估算美元成本，并显示人民币换算。
+- 额度价值对比：按本站 `¥1 = 20 张图` 计算单图 `¥0.05`，对比官方估算成本，展示大约节省金额和划算倍数。
+
+## 历史与成本
+
+历史列表会记录每次生成或编辑的关键信息，包括模型、尺寸、质量、背景、审核级别、输出格式、耗时、图片数量、提示词和成本明细。
 
 <p align="center">
-  <img src="./readme-images/cost-breakdown.jpg" alt="Interface" width="350"/>
+  <img src="./readme-images/history.jpg" alt="历史列表" width="900" />
 </p>
 
-*   **🖼️ Flexible Image Output View:** View generated image batches as a grid or select individual images for a closer look.
-*   **🚀 Send to Edit:** Quickly send any generated or history image directly to the editing form.
-*   **📋 Paste to Edit:** Paste images directly from your clipboard into the Edit mode's source image area.
-*   **💾 Storage:** Supports two modes via `NEXT_PUBLIC_IMAGE_STORAGE_MODE`:
-    *   **Filesystem (default):** Images saved to `./generated-images` on the server.
-    *   **IndexedDB:** Images saved directly in the browser's IndexedDB (ideal for serverless deployments).
-    *   Generation history metadata is always saved in the browser's local storage.
+成本展示包含三类信息：
 
-## ▲ Deploy to Vercel
+- 官方估算成本：根据接口返回的 usage 与模型单价计算。
+- 人民币换算：使用固定估算汇率展示 `USD / RMB`。
+- 本站额度价：按 `¥1 = 20 张图` 计算，帮助用户直观看到额度价值。
 
-🚨 *CAUTION: If you deploy from `main` or `master` branch, your Vercel deployment will be **publicly available** to anyone who has the URL. Deploying from other branches will require users to be logged into Vercel (on your team) to access the preview build.* 🚨
+> 说明：官方价格常量写在 `src/lib/cost-utils.ts` 中，不会实时抓取官方价格；如官方定价变化，需要同步更新该文件。
 
-You can deploy your own instance of this playground to Vercel with one click:
+<p align="center">
+  <img src="./readme-images/cost-breakdown.jpg" alt="成本明细" width="420" />
+</p>
 
-[![Deploy with Vercel](https://vercel.com/button)](https://vercel.com/new/clone?repository-url=https://github.com/alasano/gpt-image-1-playground&env=OPENAI_API_KEY,NEXT_PUBLIC_IMAGE_STORAGE_MODE,APP_PASSWORD&envDescription=OpenAI%20API%20Key%20is%20required.%20Set%20storage%20mode%20to%20indexeddb%20for%20Vercel%20deployments.&project-name=gpt-image-playground&repository-name=gpt-image-playground)
+## 蒙版编辑
 
-You will be prompted to enter your `OPENAI_API_KEY` and `APP_PASSWORD` during the deployment setup. For Vercel deployments, it's required to set `NEXT_PUBLIC_IMAGE_STORAGE_MODE` to `indexeddb`. 
+编辑模式支持直接在图片上涂抹生成蒙版，适合指定局部修改区域。
 
-Note: If `NEXT_PUBLIC_IMAGE_STORAGE_MODE` is not set, the application will automatically detect if it's running on Vercel (using the `VERCEL` or `NEXT_PUBLIC_VERCEL_ENV` environment variables) and default to `indexeddb` mode in that case. Otherwise (e.g., running locally), it defaults to `fs` mode. You can always explicitly set the variable to `fs` or `indexeddb` to override this automatic behavior.
+<p align="center">
+  <img src="./readme-images/mask-creation.jpg" alt="蒙版编辑" width="420" />
+</p>
 
-## 🚀 Getting Started [Local Deployment]
+## 存储说明
 
-Follow these steps to get the playground running locally.
+项目支持两种图片存储模式，通过 `NEXT_PUBLIC_IMAGE_STORAGE_MODE` 控制：
 
-### Prerequisites
+- `fs`：默认模式，图片保存到服务端 `generated-images` 目录。
+- `indexeddb`：图片保存到当前浏览器 IndexedDB，适合 Vercel 等无持久文件系统的部署环境。
 
-*   [Node.js](https://nodejs.org/) (Version 20 or later required)
-*   [npm](https://www.npmjs.com/), [yarn](https://yarnpkg.com/), [pnpm](https://pnpm.io/), or [bun](https://bun.sh/)
+历史元数据始终保存在浏览器 `localStorage`，不会保存到线上数据库。清空浏览器数据、切换浏览器或切换设备后，历史记录不会同步。
 
-### 1. Set Up API Key 🟢
+## 本地开发
 
-You need an OpenAI API key to use this application. 
+### 环境要求
 
-⚠️ [Your OpenAI Organization needs to be verified to use GPT Image models](https://help.openai.com/en/articles/10910291-api-organization-verification)
+- Node.js 20 或更高版本
+- npm
 
-1.  If you don't have a `.env.local` file, create one.
-2.  Add your OpenAI API key to the `.env.local` file:
+### 安装依赖
 
-    ```dotenv
-    OPENAI_API_KEY=your_openai_api_key_here
-    ```
+```bash
+npm install
+```
 
-    **Important:** Keep your API key secret. The `.env.local` file is included in `.gitignore` by default to prevent accidental commits.
+### 启动开发服务
 
----
+```bash
+npm run dev
+```
 
-#### 🟡 (Optional) IndexedDB Mode (for serverless hosts) [e.g. Vercel]
+启动后访问：
 
-For environments where the filesystem is read-only or ephemeral (like Vercel serverless functions), you can configure the application to store generated images directly in the browser's IndexedDB using Dexie.js.
+```text
+http://localhost:3000
+```
 
-Set the following environment variable in your `.env.local` file or directly in your hosting provider's UI (like Vercel):
+## API 配置
+
+你可以直接在页面右上角设置页填写 API Key、Base URL 和模型列表。也可以使用环境变量配置服务端默认值。
+
+### `.env.local` 示例
+
+```dotenv
+OPENAI_API_KEY=your_api_key_here
+OPENAI_API_BASE_URL=https://api.774966.xyz/v1
+```
+
+如果 `OPENAI_API_BASE_URL` 不填写，服务端默认使用：
+
+```text
+https://api.774966.xyz/v1
+```
+
+如果设置页里的 Base URL 留空，前端同样会默认使用：
+
+```text
+https://api.774966.xyz/v1
+```
+
+## 可选配置
+
+### IndexedDB 模式
+
+适合部署到 Vercel 等服务端文件系统不可持久保存的环境：
 
 ```dotenv
 NEXT_PUBLIC_IMAGE_STORAGE_MODE=indexeddb
 ```
 
-When this variable is set to `indexeddb`:
-*   The server API (`/api/images`) will return the image data as base64 (`b64_json`) instead of saving it to disk.
-*   The client-side application will decode the base64 data and store the image blob in IndexedDB.
-*   Images will be served directly from the browser's storage using Blob URLs.
+未设置时，本地默认使用 `fs`。如果部署环境检测到 Vercel，项目会默认使用 `indexeddb`。
 
-If this variable is **not set** or has any other value, the application defaults to the standard behavior of saving images to the `./generated-images` directory on the server's filesystem.
+### 访问密码
 
-**Note:** If `NEXT_PUBLIC_IMAGE_STORAGE_MODE` is not set, the application will automatically detect if it's running on Vercel (using the `VERCEL` or `NEXT_PUBLIC_VERCEL_ENV` environment variables) and default to `indexeddb` mode in that case. Otherwise (e.g., running locally), it defaults to `fs` mode. You can always explicitly set the variable to `fs` or `indexeddb` to override this automatic behavior.
+可以配置一个简单的应用密码：
 
-#### 🟡 (Optional) Use a Custom API Endpoint
-
-If you need to use an OpenAI-compatible API endpoint (e.g., a local model server or a different provider), you can specify its base URL using the `OPENAI_API_BASE_URL` environment variable in your `.env.local` file:
-
-```dotenv
-OPENAI_API_KEY=your_openai_api_key_here
-OPENAI_API_BASE_URL=your_compatible_api_endpoint_here
-```
-
-If `OPENAI_API_BASE_URL` is not set, the application will default to the standard OpenAI API endpoint.
-
----
-
-
-#### 🟡 (Optional) Enable Password Validation
 ```dotenv
 APP_PASSWORD=your_password_here
 ```
-When `APP_PASSWORD` is set, the frontend will prompt you for a password to authenticate requests.
+
+启用后，前端会要求输入密码再发起生成请求。
+
 <p align="center">
-  <img src="./readme-images/password-dialog.jpg" alt="Password Dialog" width="460"/>
+  <img src="./readme-images/password-dialog.jpg" alt="密码弹窗" width="460" />
 </p>
 
----
-
-### 2. Install Dependencies 🟢
-
-Navigate to the project directory in your terminal and install the necessary packages:
+## 常用命令
 
 ```bash
-npm install
-# or
-# yarn install
-# or
-# pnpm install
-# or
-# bun install
-```
-
-### 3. Run the Development Server 🟢
-
-Start the Next.js development server:
-
-```bash
+# 开发
 npm run dev
-# or
-# yarn dev
-# or
-# pnpm dev
-# or
-# bun dev
+
+# 代码检查
+npm run lint
+
+# 生产构建
+npm run build
+
+# 启动生产服务
+npm run start
 ```
 
-### 4. Open the Playground 🟢
+## 目录结构
 
-Open [http://localhost:3000](http://localhost:3000) in your web browser. You should now be able to use the gpt-image-1 Playground!
+```text
+src/
+  app/                 Next.js App Router 页面与 API
+  components/          页面组件与 UI 组件
+  lib/                 设置、i18n、成本、尺寸、IndexedDB 等工具
+public/                静态资源
+readme-images/         README 截图
+generated-images/      fs 模式下的图片输出目录
+```
 
-## 🤝 Contributing
+## 注意事项
 
-Contributions are welcome! Issues and feature requests, not as much welcome but I'll think about it.
+- API Key 请妥善保存，不要提交到仓库。
+- 设置页保存的是浏览器本地配置，不是账号级云端配置。
+- IndexedDB 模式下，图片只在当前浏览器中可用。
+- `generated-images` 目录适合本地或有持久磁盘的服务器，不适合无状态 Serverless 持久存储。
+- 官方成本只是估算值，实际账单以接口服务商结算为准。
 
-## 📄 License
+## License
 
 MIT
