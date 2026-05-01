@@ -21,7 +21,7 @@ import {
     isHighResolutionSize
 } from '@/lib/size-utils';
 import { useLiveQuery } from 'dexie-react-hooks';
-import { CheckCircle2, ExternalLink, Eye, EyeOff, KeyRound, Languages, Moon, Sun } from 'lucide-react';
+import { CheckCircle2, ExternalLink, Eye, EyeOff, Github, KeyRound, Languages, Moon, Sun } from 'lucide-react';
 import { useTheme } from 'next-themes';
 import * as React from 'react';
 
@@ -1279,6 +1279,16 @@ export default function HomePage() {
                         />
                     </section>
                 </div>
+                <footer className='shrink-0 text-center text-xs text-white/40'>
+                    <a
+                        href='https://github.com/Lyricus233/gpt-image-2-webui'
+                        target='_blank'
+                        rel='noreferrer'
+                        className='inline-flex items-center gap-1.5 transition-colors hover:text-white/75'>
+                        <Github className='h-3.5 w-3.5' />
+                        GitHub
+                    </a>
+                </footer>
             </div>
         </main>
     );
