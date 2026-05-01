@@ -13,3 +13,9 @@ services:
       APP_PASSWORD: ${APP_PASSWORD:-}
     volumes:
       - ./generated-images:/app/generated-images
+    networks:
+      - ai-net
+
+networks:
+  ai-net:
+    external: true
