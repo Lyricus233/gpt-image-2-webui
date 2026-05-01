@@ -1,7 +1,11 @@
 import { NextResponse } from 'next/server';
 
 function getConfiguredApiBaseUrl() {
-    return process.env.OPENAI_API_BASE_URL?.trim() || '';
+    return (
+        process.env.OPENAI_API_PUBLIC_BASE_URL?.trim() ||
+        process.env.OPENAI_API_BASE_URL?.trim() ||
+        ''
+    );
 }
 
 function getTokenConsoleUrl(apiBaseUrl: string) {

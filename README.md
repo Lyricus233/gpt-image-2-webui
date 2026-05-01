@@ -158,6 +158,7 @@ chmod +x /opt/gpt-image-2-webui/scripts/cleanup-generated-images.sh
 PORT=3000
 OPENAI_API_KEY=your_api_key_here
 OPENAI_API_BASE_URL=https://your-openai-compatible-api.example/v1
+OPENAI_API_PUBLIC_BASE_URL=
 OPENAI_IMAGE_TIMEOUT_MS=1200000
 NEXT_PUBLIC_IMAGE_STORAGE_MODE=fs
 APP_PASSWORD=
