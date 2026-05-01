@@ -1,3 +1,4 @@
+import { GPT_IMAGE_2_PRO_MODEL, isEditSizeSupported, isHighResolutionSize } from '@/lib/size-utils';
 import crypto from 'crypto';
 import fs from 'fs/promises';
 import { NextRequest, NextResponse } from 'next/server';
@@ -26,7 +27,6 @@ type StreamingEvent = {
 };
 
 const outputDir = path.resolve(process.cwd(), 'generated-images');
-const DEFAULT_API_BASE_URL = 'https://api.774966.xyz/v1';
 const DEFAULT_IMAGE_REQUEST_TIMEOUT_MS = 20 * 60 * 1000;
 
 function getImageRequestTimeoutMs() {
@@ -264,11 +264,10 @@ export async function POST(request: NextRequest) {
         }
 
         const localApiKey = (formData.get('apiKey') as string | null)?.trim();
-        const localBaseUrl = (formData.get('baseUrl') as string | null)?.trim();
         const responseLanguage = formData.get('responseLanguage');
         const acceptLanguage = getPreferredAcceptLanguage(responseLanguage, request);
         const apiKey = localApiKey || process.env.OPENAI_API_KEY;
-        const baseURL = localBaseUrl || process.env.OPENAI_API_BASE_URL || DEFAULT_API_BASE_URL;
+        const baseURL = process.env.OPENAI_API_BASE_URL?.trim();
 
         if (!apiKey) {
             console.error('No API key was provided by local settings or OPENAI_API_KEY.');
@@ -278,10 +277,18 @@ export async function POST(request: NextRequest) {
             );
         }
 
+        if (!baseURL) {
+            console.error('OPENAI_API_BASE_URL is not configured.');
+            return NextResponse.json(
+                { error: 'API base URL not configured. Set OPENAI_API_BASE_URL.' },
+                { status: 500 }
+            );
+        }
+
         const imageRequestTimeoutMs = getImageRequestTimeoutMs();
         const openai = new OpenAI({
             apiKey,
-            baseURL: baseURL || undefined,
+            baseURL,
             timeout: imageRequestTimeoutMs,
             defaultHeaders: {
                 'Accept-Language': acceptLanguage
@@ -292,7 +299,7 @@ export async function POST(request: NextRequest) {
 
         const mode = formData.get('mode') as 'generate' | 'edit' | null;
         const prompt = formData.get('prompt') as string | null;
-        const model = ((formData.get('model') as string | null)?.trim() || 'gpt-image-2') as
+        let model = ((formData.get('model') as string | null)?.trim() || 'gpt-image-2') as
             | OpenAI.Images.ImageGenerateParams['model']
             | OpenAI.Images.ImageEditParams['model'];
 
@@ -312,9 +319,14 @@ export async function POST(request: NextRequest) {
 
         if (mode === 'generate') {
             const n = parseInt((formData.get('n') as string) || '1', 10);
-            requestedImageCount = Math.max(1, Math.min(n || 1, 10));
             // gpt-image-2 accepts arbitrary WxH strings that the SDK's narrow literal union doesn't express.
-            const size = ((formData.get('size') as string) || '1024x1024') as OpenAI.Images.ImageGenerateParams['size'];
+            const sizeValue = (formData.get('size') as string | null) || '1024x1024';
+            const size = sizeValue as OpenAI.Images.ImageGenerateParams['size'];
+            const highResolutionSize = isHighResolutionSize(sizeValue);
+            requestedImageCount = Math.max(1, Math.min(n || 1, highResolutionSize ? 1 : 10));
+            if (highResolutionSize) {
+                model = GPT_IMAGE_2_PRO_MODEL as typeof model;
+            }
             const quality = (formData.get('quality') as OpenAI.Images.ImageGenerateParams['quality']) || 'auto';
             const output_format =
                 (formData.get('output_format') as OpenAI.Images.ImageGenerateParams['output_format']) || 'png';
@@ -323,7 +335,7 @@ export async function POST(request: NextRequest) {
                 (formData.get('background') as OpenAI.Images.ImageGenerateParams['background']) || 'auto';
             const moderation =
                 (formData.get('moderation') as OpenAI.Images.ImageGenerateParams['moderation']) || 'auto';
-            const promptWithAspectInstruction = withAspectInstruction(prompt, size, responseLanguage);
+            const promptWithAspectInstruction = withAspectInstruction(prompt, sizeValue, responseLanguage);
 
             const baseParams = {
                 model,
@@ -332,6 +344,7 @@ export async function POST(request: NextRequest) {
                 size,
                 quality,
                 output_format,
+                response_format: 'b64_json' as const,
                 background,
                 moderation
             };
@@ -462,8 +475,21 @@ export async function POST(request: NextRequest) {
             const n = parseInt((formData.get('n') as string) || '1', 10);
             requestedImageCount = Math.max(1, Math.min(n || 1, 10));
             // gpt-image-2 accepts arbitrary WxH strings that the SDK's narrow literal union doesn't express.
-            const size = ((formData.get('size') as string) || 'auto') as OpenAI.Images.ImageEditParams['size'];
+            const sizeValue = (formData.get('size') as string | null) || 'auto';
+            const size = sizeValue as OpenAI.Images.ImageEditParams['size'];
             const quality = (formData.get('quality') as OpenAI.Images.ImageEditParams['quality']) || 'auto';
+
+            if (!isEditSizeSupported(sizeValue)) {
+                return NextResponse.json(
+                    {
+                        error:
+                            responseLanguage === 'zh'
+                                ? '图生图仅支持 1K 尺寸，已禁止 2K/4K 输出。'
+                                : 'Edit mode only supports 1K sizes. 2K/4K output is blocked.'
+                    },
+                    { status: 400 }
+                );
+            }
 
             const imageFiles: File[] = [];
             for (const [key, value] of formData.entries()) {
@@ -480,10 +506,11 @@ export async function POST(request: NextRequest) {
 
             const baseEditParams = {
                 model,
-                prompt: withAspectInstruction(prompt, size === 'auto' ? undefined : size, responseLanguage),
+                prompt: withAspectInstruction(prompt, sizeValue === 'auto' ? undefined : sizeValue, responseLanguage),
                 image: imageFiles,
                 n: requestedImageCount,
-                size: size === 'auto' ? undefined : size,
+                size: sizeValue === 'auto' ? undefined : size,
+                response_format: 'b64_json' as const,
                 quality: quality === 'auto' ? undefined : quality
             };
 

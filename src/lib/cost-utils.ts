@@ -36,7 +36,7 @@ const GPT_IMAGE_2_IMAGE_OUTPUT_COST_PER_TOKEN = 0.00003; // $30.00/1M
 export type GptImageModel = string;
 
 export const USD_TO_CNY_RATE = 6.83;
-export const SITE_IMAGES_PER_CNY = 20;
+export const SITE_IMAGES_PER_CNY = 10;
 export const SITE_CNY_PER_IMAGE = 1 / SITE_IMAGES_PER_CNY;
 
 export type SiteValueComparison = {
@@ -57,6 +57,10 @@ export type ModelRates = {
     imageInputPerMillion: number;
     imageOutputPerMillion: number;
 };
+
+function usesGptImage2Rates(model: GptImageModel): boolean {
+    return model === 'gpt-image-2' || model === 'gpt-image-2-pro';
+}
 
 export function getModelRates(model: GptImageModel): ModelRates {
     if (model === 'gpt-image-1-mini') {
@@ -79,7 +83,7 @@ export function getModelRates(model: GptImageModel): ModelRates {
             imageOutputPerMillion: 32
         };
     }
-    if (model === 'gpt-image-2') {
+    if (usesGptImage2Rates(model)) {
         return {
             textInputPerToken: GPT_IMAGE_2_TEXT_INPUT_COST_PER_TOKEN,
             imageInputPerToken: GPT_IMAGE_2_IMAGE_INPUT_COST_PER_TOKEN,
@@ -183,7 +187,7 @@ export function calculateApiCost(
         textInputCost = GPT_IMAGE_1_5_TEXT_INPUT_COST_PER_TOKEN;
         imageInputCost = GPT_IMAGE_1_5_IMAGE_INPUT_COST_PER_TOKEN;
         imageOutputCost = GPT_IMAGE_1_5_IMAGE_OUTPUT_COST_PER_TOKEN;
-    } else if (model === 'gpt-image-2') {
+    } else if (usesGptImage2Rates(model)) {
         textInputCost = GPT_IMAGE_2_TEXT_INPUT_COST_PER_TOKEN;
         imageInputCost = GPT_IMAGE_2_IMAGE_INPUT_COST_PER_TOKEN;
         imageOutputCost = GPT_IMAGE_2_IMAGE_OUTPUT_COST_PER_TOKEN;

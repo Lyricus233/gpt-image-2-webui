@@ -10,11 +10,16 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { defaultApiBaseUrl, useAppSettings } from '@/lib/app-settings';
+import { useAppSettings } from '@/lib/app-settings';
 import { calculateApiCost, type CostDetails, type GptImageModel } from '@/lib/cost-utils';
 import { db, type ImageRecord } from '@/lib/db';
 import { useI18n, type LanguagePreference } from '@/lib/i18n';
-import { getPresetDimensions } from '@/lib/size-utils';
+import {
+    GPT_IMAGE_2_PRO_MODEL,
+    getPresetDimensions,
+    isEditSizeSupported,
+    isHighResolutionSize
+} from '@/lib/size-utils';
 import { useLiveQuery } from 'dexie-react-hooks';
 import { CheckCircle2, ExternalLink, Eye, EyeOff, KeyRound, Languages, Moon, Sun } from 'lucide-react';
 import { useTheme } from 'next-themes';
@@ -98,9 +103,15 @@ type ImageApiResult = {
     error?: string;
 };
 
+type AuthStatusResult = {
+    passwordRequired?: boolean;
+    apiBaseUrl?: string;
+    tokenConsoleUrl?: string;
+};
+
 export default function HomePage() {
     const { language, languagePreference, setLanguagePreference, t } = useI18n();
-    const { settings, saveSettings } = useAppSettings();
+    const { settings, modelOptions, saveSettings } = useAppSettings();
     const { resolvedTheme, setTheme } = useTheme();
     const [isThemeMounted, setIsThemeMounted] = React.useState(false);
     const [mode, setMode] = React.useState<'generate' | 'edit'>('generate');
@@ -120,6 +131,8 @@ export default function HomePage() {
     const [imageSrcByFilename, setImageSrcByFilename] = React.useState<Record<string, string>>({});
     const [isInitialLoad, setIsInitialLoad] = React.useState(true);
     const blobUrlCacheRef = React.useRef<Map<string, string>>(new Map());
+    const [apiBaseUrl, setApiBaseUrl] = React.useState('');
+    const [tokenConsoleUrl, setTokenConsoleUrl] = React.useState('');
     const [isPasswordDialogOpen, setIsPasswordDialogOpen] = React.useState(false);
     const [passwordDialogContext, setPasswordDialogContext] = React.useState<'initial' | 'retry'>('initial');
     const [lastApiCallArgs, setLastApiCallArgs] = React.useState<[GenerationFormData | EditingFormData] | null>(null);
@@ -134,9 +147,7 @@ export default function HomePage() {
     const [editSourceImagePreviewUrls, setEditSourceImagePreviewUrls] = React.useState<string[]>([]);
     const [editPrompt, setEditPrompt] = React.useState('');
     const [editN, setEditN] = React.useState([1]);
-    const [editSize, setEditSize] = React.useState<EditingFormData['size']>('square');
-    const [editCustomWidth, setEditCustomWidth] = React.useState<number>(1024);
-    const [editCustomHeight, setEditCustomHeight] = React.useState<number>(1024);
+    const [editSize, setEditSize] = React.useState<EditingFormData['size']>('1024x1024');
     const [editQuality, setEditQuality] = React.useState<EditingFormData['quality']>('auto');
     const [editBrushSize, setEditBrushSize] = React.useState([20]);
     const [editShowMaskEditor, setEditShowMaskEditor] = React.useState(false);
@@ -148,19 +159,17 @@ export default function HomePage() {
     const [editDrawnPoints, setEditDrawnPoints] = React.useState<DrawnPoint[]>([]);
     const [editMaskPreviewUrl, setEditMaskPreviewUrl] = React.useState<string | null>(null);
 
-    const genModel = 'gpt-image-2' as GenerationFormData['model'];
+    const [genModel, setGenModel] = React.useState<GenerationFormData['model']>('gpt-image-2');
     const [genPrompt, setGenPrompt] = React.useState('');
     const [genN, setGenN] = React.useState([1]);
-    const [genSize, setGenSize] = React.useState<GenerationFormData['size']>('square');
-    const [genCustomWidth, setGenCustomWidth] = React.useState<number>(1024);
-    const [genCustomHeight, setGenCustomHeight] = React.useState<number>(1024);
+    const [genSize, setGenSize] = React.useState<GenerationFormData['size']>('1024x1024');
     const [genQuality, setGenQuality] = React.useState<GenerationFormData['quality']>('auto');
     const [genOutputFormat, setGenOutputFormat] = React.useState<GenerationFormData['output_format']>('png');
     const [genCompression, setGenCompression] = React.useState([100]);
     const [genBackground, setGenBackground] = React.useState<GenerationFormData['background']>('auto');
     const [genModeration, setGenModeration] = React.useState<GenerationFormData['moderation']>('auto');
 
-    const editModel = 'gpt-image-2' as EditingFormData['model'];
+    const [editModel, setEditModel] = React.useState<EditingFormData['model']>('gpt-image-2');
 
     const normalizeRevisedPrompt = React.useCallback((value: unknown): string | undefined => {
         return typeof value === 'string' && value.trim() ? value : undefined;
@@ -193,6 +202,16 @@ export default function HomePage() {
             ...settings,
             baseUrl: '',
             apiKey: value
+        });
+    };
+
+    const rememberModelOption = (model: string) => {
+        const trimmedModel = model.trim();
+        if (!trimmedModel || modelOptions.includes(trimmedModel)) return;
+
+        saveSettings({
+            ...settings,
+            models: [...settings.models, trimmedModel]
         });
     };
 
@@ -318,11 +337,15 @@ export default function HomePage() {
                 if (!response.ok) {
                     throw new Error('Failed to fetch auth status');
                 }
-                const data = await response.json();
-                setIsPasswordRequiredByBackend(data.passwordRequired);
+                const data = (await response.json()) as AuthStatusResult;
+                setIsPasswordRequiredByBackend(Boolean(data.passwordRequired));
+                setApiBaseUrl(typeof data.apiBaseUrl === 'string' ? data.apiBaseUrl : '');
+                setTokenConsoleUrl(typeof data.tokenConsoleUrl === 'string' ? data.tokenConsoleUrl : '');
             } catch (error) {
                 console.error('Error fetching auth status:', error);
                 setIsPasswordRequiredByBackend(false);
+                setApiBaseUrl('');
+                setTokenConsoleUrl('');
             }
         };
 
@@ -494,6 +517,13 @@ export default function HomePage() {
     };
 
     const handleApiCall = async (formData: GenerationFormData | EditingFormData) => {
+        let selectedModel = (mode === 'generate' ? genModel : editModel).trim();
+
+        if (!selectedModel) {
+            setError(t('page.modelRequired'));
+            return;
+        }
+
         const startTime = Date.now();
         let durationMs = 0;
 
@@ -507,12 +537,10 @@ export default function HomePage() {
 
         const apiFormData = new FormData();
         const apiKey = apiKeyDraft.trim() || settings.apiKey.trim();
-        const baseUrl = defaultApiBaseUrl;
 
         if (apiKey) {
             apiFormData.append('apiKey', apiKey);
         }
-        apiFormData.append('baseUrl', baseUrl);
         apiFormData.append('responseLanguage', language);
 
         if (isPasswordRequiredByBackend && clientPasswordHash) {
@@ -533,45 +561,55 @@ export default function HomePage() {
 
         if (mode === 'generate') {
             const genData = formData as GenerationFormData;
-            apiFormData.append('model', genModel);
-            apiFormData.append('prompt', genPrompt);
-            apiFormData.append('n', genN[0].toString());
-            const genSizeToSend =
-                genSize === 'custom'
-                    ? `${genCustomWidth}x${genCustomHeight}`
-                    : (getPresetDimensions(genSize, genModel) ?? genSize);
+            const genSizeToSend = getPresetDimensions(genData.size, selectedModel) ?? genData.size;
+            const requestN = isHighResolutionSize(genSizeToSend) ? 1 : genData.n;
+            if (isHighResolutionSize(genSizeToSend)) {
+                selectedModel = GPT_IMAGE_2_PRO_MODEL;
+            }
+
+            rememberModelOption(selectedModel);
+            apiFormData.append('model', selectedModel);
+            apiFormData.append('prompt', genData.prompt);
+            apiFormData.append('n', requestN.toString());
             requestSize = genSizeToSend;
             apiFormData.append('size', genSizeToSend);
-            apiFormData.append('quality', genQuality);
-            apiFormData.append('output_format', genOutputFormat);
+            apiFormData.append('quality', genData.quality);
+            apiFormData.append('output_format', genData.output_format);
             if (
-                (genOutputFormat === 'jpeg' || genOutputFormat === 'webp') &&
+                (genData.output_format === 'jpeg' || genData.output_format === 'webp') &&
                 genData.output_compression !== undefined
             ) {
                 requestOutputCompression = genData.output_compression;
                 apiFormData.append('output_compression', genData.output_compression.toString());
             }
-            apiFormData.append('background', genBackground);
-            apiFormData.append('moderation', genModeration);
+            apiFormData.append('background', genData.background);
+            apiFormData.append('moderation', genData.moderation);
         } else {
-            apiFormData.append('model', editModel);
-            apiFormData.append('prompt', editPrompt);
-            apiFormData.append('n', editN[0].toString());
-            const editSizeToSend =
-                editSize === 'custom'
-                    ? `${editCustomWidth}x${editCustomHeight}`
-                    : (getPresetDimensions(editSize, editModel) ?? editSize);
-            requestSize = editSizeToSend;
-            requestSourceImageCount = editImageFiles.length;
-            requestHasMask = !!editGeneratedMaskFile;
-            apiFormData.append('size', editSizeToSend);
-            apiFormData.append('quality', editQuality);
+            const editData = formData as EditingFormData;
+            const editSizeToSend = getPresetDimensions(editData.size, selectedModel) ?? editData.size;
 
-            editImageFiles.forEach((file, index) => {
+            if (!isEditSizeSupported(editSizeToSend)) {
+                setError(t('form.validation.editHighResUnsupported'));
+                setIsLoading(false);
+                setActiveRequestStartedAt(null);
+                return;
+            }
+
+            rememberModelOption(selectedModel);
+            apiFormData.append('model', selectedModel);
+            apiFormData.append('prompt', editData.prompt);
+            apiFormData.append('n', editData.n.toString());
+            requestSize = editSizeToSend;
+            requestSourceImageCount = editData.imageFiles.length;
+            requestHasMask = !!editData.maskFile;
+            apiFormData.append('size', editSizeToSend);
+            apiFormData.append('quality', editData.quality);
+
+            editData.imageFiles.forEach((file, index) => {
                 apiFormData.append(`image_${index}`, file, file.name);
             });
-            if (editGeneratedMaskFile) {
-                apiFormData.append('mask', editGeneratedMaskFile, editGeneratedMaskFile.name);
+            if (editData.maskFile) {
+                apiFormData.append('mask', editData.maskFile, editData.maskFile.name);
             }
         }
 
@@ -638,7 +676,7 @@ export default function HomePage() {
                                             historyPrompt = editPrompt;
                                         }
 
-                                        const currentModel = mode === 'generate' ? genModel : editModel;
+                                        const currentModel = selectedModel;
                                         const eventImages = event.images as ApiImageResponseItem[];
                                         const revisedPrompt = getBatchRevisedPrompt(eventImages, event.revised_prompt);
                                         const costDetails = calculateApiCost(event.usage, currentModel);
@@ -733,7 +771,7 @@ export default function HomePage() {
                     historyPrompt = editPrompt;
                 }
 
-                const currentModel = mode === 'generate' ? genModel : editModel;
+                const currentModel = selectedModel;
                 const revisedPrompt = getBatchRevisedPrompt(result.images, result.revised_prompt);
                 const costDetails = calculateApiCost(result.usage, currentModel);
 
@@ -1024,7 +1062,9 @@ export default function HomePage() {
                             </p>
                             <h1 className='mt-0.5 text-2xl font-semibold text-white md:text-3xl'>{t('home.title')}</h1>
                             <p className='mt-1 text-sm text-white/55'>
-                                {t('home.fixedEndpoint', { url: defaultApiBaseUrl })}
+                                {t('home.fixedEndpoint', {
+                                    url: apiBaseUrl || t('home.apiBaseUrlNotConfigured')
+                                })}
                             </p>
                         </div>
 
@@ -1054,20 +1094,22 @@ export default function HomePage() {
                                         aria-label={showApiKey ? t('home.hideApiKey') : t('home.showApiKey')}>
                                         {showApiKey ? <EyeOff className='h-4 w-4' /> : <Eye className='h-4 w-4' />}
                                     </Button>
-                                    <Button
-                                        asChild
-                                        type='button'
-                                        variant='outline'
-                                        className='h-9 shrink-0 border-white/20 px-2.5 text-xs text-white/75 hover:bg-white/10 hover:text-white'>
-                                        <a
-                                            href='https://api.774966.xyz/console/token'
-                                            target='_blank'
-                                            rel='noreferrer'
-                                            aria-label={t('home.getApiKeyAria')}>
-                                            <ExternalLink className='h-3.5 w-3.5' />
-                                            {t('home.getApiKey')}
-                                        </a>
-                                    </Button>
+                                    {tokenConsoleUrl && (
+                                        <Button
+                                            asChild
+                                            type='button'
+                                            variant='outline'
+                                            className='h-9 shrink-0 border-white/20 px-2.5 text-xs text-white/75 hover:bg-white/10 hover:text-white'>
+                                            <a
+                                                href={tokenConsoleUrl}
+                                                target='_blank'
+                                                rel='noreferrer'
+                                                aria-label={t('home.getApiKeyAria')}>
+                                                <ExternalLink className='h-3.5 w-3.5' />
+                                                {t('home.getApiKey')}
+                                            </a>
+                                        </Button>
+                                    )}
                                 </div>
                             </div>
 
@@ -1135,16 +1177,14 @@ export default function HomePage() {
                                 clientPasswordHash={clientPasswordHash}
                                 onOpenPasswordDialog={handleOpenPasswordDialog}
                                 model={genModel}
+                                setModel={setGenModel}
+                                modelOptions={modelOptions}
                                 prompt={genPrompt}
                                 setPrompt={setGenPrompt}
                                 n={genN}
                                 setN={setGenN}
                                 size={genSize}
                                 setSize={setGenSize}
-                                customWidth={genCustomWidth}
-                                setCustomWidth={setGenCustomWidth}
-                                customHeight={genCustomHeight}
-                                setCustomHeight={setGenCustomHeight}
                                 quality={genQuality}
                                 setQuality={setGenQuality}
                                 outputFormat={genOutputFormat}
@@ -1167,6 +1207,8 @@ export default function HomePage() {
                                 clientPasswordHash={clientPasswordHash}
                                 onOpenPasswordDialog={handleOpenPasswordDialog}
                                 editModel={editModel}
+                                setEditModel={setEditModel}
+                                modelOptions={modelOptions}
                                 imageFiles={editImageFiles}
                                 sourceImagePreviewUrls={editSourceImagePreviewUrls}
                                 setImageFiles={setEditImageFiles}
@@ -1178,10 +1220,6 @@ export default function HomePage() {
                                 setEditN={setEditN}
                                 editSize={editSize}
                                 setEditSize={setEditSize}
-                                editCustomWidth={editCustomWidth}
-                                setEditCustomWidth={setEditCustomWidth}
-                                editCustomHeight={editCustomHeight}
-                                setEditCustomHeight={setEditCustomHeight}
                                 editQuality={editQuality}
                                 setEditQuality={setEditQuality}
                                 editBrushSize={editBrushSize}

@@ -24,7 +24,7 @@ export function SiteValueComparison({ officialUsdCost, imageCount }: SiteValueCo
         <div className='rounded-md border border-emerald-400/25 bg-emerald-400/10 p-3 text-emerald-50'>
             <div className='flex items-center gap-2'>
                 <BadgePercent className='h-4 w-4 text-emerald-300' />
-                <p className='text-sm font-medium'>{t('valueComparison.title')}</p>
+                <p className='text-sm font-medium'>{t('valueComparison.title')} (gpt-image-2)</p>
             </div>
 
             <div className='mt-3 grid grid-cols-2 gap-2 text-xs text-emerald-50/75'>

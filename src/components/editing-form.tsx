@@ -1,6 +1,8 @@
 'use client';
 
 import { ModeToggle } from '@/components/mode-toggle';
+import { ModelSelect } from '@/components/model-select';
+import { SizeSelect } from '@/components/size-select';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
@@ -8,18 +10,14 @@ import { Label } from '@/components/ui/label';
 import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group';
 import { Slider } from '@/components/ui/slider';
 import { Textarea } from '@/components/ui/textarea';
-import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import type { GptImageModel } from '@/lib/cost-utils';
-import { formatSizeValidationReason, useI18n } from '@/lib/i18n';
-import { getPresetTooltip, validateGptImage2Size } from '@/lib/size-utils';
+import { useI18n } from '@/lib/i18n';
+import { isEditSizeSupported } from '@/lib/size-utils';
 import type { SizePreset } from '@/lib/size-utils';
 import {
     Upload,
     Eraser,
     Save,
-    Square,
-    RectangleHorizontal,
-    RectangleVertical,
     Sparkles,
     Tally1,
     Tally2,
@@ -29,8 +27,7 @@ import {
     ScanEye,
     UploadCloud,
     Lock,
-    LockOpen,
-    SquareDashed
+    LockOpen
 } from 'lucide-react';
 import Image from 'next/image';
 import * as React from 'react';
@@ -45,8 +42,6 @@ export type EditingFormData = {
     prompt: string;
     n: number;
     size: SizePreset;
-    customWidth: number;
-    customHeight: number;
     quality: 'low' | 'medium' | 'high' | 'auto';
     imageFiles: File[];
     maskFile: File | null;
@@ -62,6 +57,8 @@ type EditingFormProps = {
     clientPasswordHash: string | null;
     onOpenPasswordDialog: () => void;
     editModel: EditingFormData['model'];
+    setEditModel: React.Dispatch<React.SetStateAction<EditingFormData['model']>>;
+    modelOptions: string[];
     imageFiles: File[];
     sourceImagePreviewUrls: string[];
     setImageFiles: React.Dispatch<React.SetStateAction<File[]>>;
@@ -73,10 +70,6 @@ type EditingFormProps = {
     setEditN: React.Dispatch<React.SetStateAction<number[]>>;
     editSize: EditingFormData['size'];
     setEditSize: React.Dispatch<React.SetStateAction<EditingFormData['size']>>;
-    editCustomWidth: number;
-    setEditCustomWidth: React.Dispatch<React.SetStateAction<number>>;
-    editCustomHeight: number;
-    setEditCustomHeight: React.Dispatch<React.SetStateAction<number>>;
     editQuality: EditingFormData['quality'];
     setEditQuality: React.Dispatch<React.SetStateAction<EditingFormData['quality']>>;
     editBrushSize: number[];
@@ -128,6 +121,8 @@ export function EditingForm({
     clientPasswordHash,
     onOpenPasswordDialog,
     editModel,
+    setEditModel,
+    modelOptions,
     imageFiles,
     sourceImagePreviewUrls,
     setImageFiles,
@@ -139,10 +134,6 @@ export function EditingForm({
     setEditN,
     editSize,
     setEditSize,
-    editCustomWidth,
-    setEditCustomWidth,
-    editCustomHeight,
-    setEditCustomHeight,
     editQuality,
     setEditQuality,
     editBrushSize,
@@ -163,17 +154,14 @@ export function EditingForm({
     const { t } = useI18n();
     const [firstImagePreviewUrl, setFirstImagePreviewUrl] = React.useState<string | null>(null);
 
-    const isGptImage2 = editModel === 'gpt-image-2';
-    const customSizeValidation =
-        editSize === 'custom' ? validateGptImage2Size(editCustomWidth, editCustomHeight) : { valid: true as const };
-    const customSizeInvalid = editSize === 'custom' && !customSizeValidation.valid;
+    const modelMissing = !editModel.trim();
+    const sizeUnsupported = !isEditSizeSupported(editSize);
 
-    // 'custom' is only valid on gpt-image-2; reset when switching to a legacy model
     React.useEffect(() => {
-        if (!isGptImage2 && editSize === 'custom') {
-            setEditSize('square');
+        if (sizeUnsupported) {
+            setEditSize('1024x1024');
         }
-    }, [isGptImage2, editSize, setEditSize]);
+    }, [sizeUnsupported, setEditSize]);
 
     const canvasRef = React.useRef<HTMLCanvasElement>(null);
     const visualFeedbackCanvasRef = React.useRef<HTMLCanvasElement | null>(null);
@@ -468,7 +456,8 @@ export function EditingForm({
             alert(t('form.validation.saveMaskBeforeSubmit'));
             return;
         }
-        if (customSizeInvalid) {
+        if (sizeUnsupported) {
+            alert(t('form.validation.editHighResUnsupported'));
             return;
         }
 
@@ -476,8 +465,6 @@ export function EditingForm({
             prompt: editPrompt,
             n: editN[0],
             size: editSize,
-            customWidth: editCustomWidth,
-            customHeight: editCustomHeight,
             quality: editQuality,
             imageFiles: imageFiles,
             maskFile: editGeneratedMaskFile,
@@ -491,13 +478,6 @@ export function EditingForm({
         if (files.length === 1) return files[0].name;
         return t('form.filesSelected', { count: files.length });
     };
-
-    const customPixelCount = editCustomWidth * editCustomHeight;
-    const customPixelPercent = ((customPixelCount / 8_294_400) * 100).toFixed(1);
-    const customRatio =
-        editCustomWidth > 0 && editCustomHeight > 0
-            ? (Math.max(editCustomWidth, editCustomHeight) / Math.min(editCustomWidth, editCustomHeight)).toFixed(2)
-            : null;
 
     return (
         <Card className='flex h-full w-full flex-col overflow-hidden rounded-lg border border-white/10 bg-black'>
@@ -536,6 +516,15 @@ export function EditingForm({
                             className='min-h-[80px] rounded-md border border-white/20 bg-black text-white placeholder:text-white/40 focus:border-white/50 focus:ring-white/50'
                         />
                     </div>
+
+                    <ModelSelect
+                        id='edit-model'
+                        customInputId='edit-custom-model'
+                        model={editModel}
+                        modelOptions={modelOptions}
+                        onModelChange={setEditModel}
+                        disabled={isLoading}
+                    />
 
                     <div className='space-y-2'>
                         <Label className='text-white'>{t('form.sourceImages', { maxImages })}</Label>
@@ -727,119 +716,13 @@ export function EditingForm({
                         )}
                     </div>
 
-                    <div className='space-y-3'>
-                        <Label className='block text-white'>{t('common.size')}</Label>
-                        <RadioGroup
-                            value={editSize}
-                            onValueChange={(value) => setEditSize(value as EditingFormData['size'])}
-                            disabled={isLoading}
-                            className='flex flex-wrap gap-x-5 gap-y-3'>
-                            <Tooltip>
-                                <TooltipTrigger asChild>
-                                    <div>
-                                        <RadioItemWithIcon
-                                            value='square'
-                                            id='edit-size-square'
-                                            label={t('common.square')}
-                                            Icon={Square}
-                                        />
-                                    </div>
-                                </TooltipTrigger>
-                                <TooltipContent>{getPresetTooltip('square', editModel)}</TooltipContent>
-                            </Tooltip>
-                            <Tooltip>
-                                <TooltipTrigger asChild>
-                                    <div>
-                                        <RadioItemWithIcon
-                                            value='landscape'
-                                            id='edit-size-landscape'
-                                            label={t('common.landscape')}
-                                            Icon={RectangleHorizontal}
-                                        />
-                                    </div>
-                                </TooltipTrigger>
-                                <TooltipContent>{getPresetTooltip('landscape', editModel)}</TooltipContent>
-                            </Tooltip>
-                            <Tooltip>
-                                <TooltipTrigger asChild>
-                                    <div>
-                                        <RadioItemWithIcon
-                                            value='portrait'
-                                            id='edit-size-portrait'
-                                            label={t('common.portrait')}
-                                            Icon={RectangleVertical}
-                                        />
-                                    </div>
-                                </TooltipTrigger>
-                                <TooltipContent>{getPresetTooltip('portrait', editModel)}</TooltipContent>
-                            </Tooltip>
-                            {isGptImage2 && (
-                                <RadioItemWithIcon
-                                    value='custom'
-                                    id='edit-size-custom'
-                                    label={t('common.custom')}
-                                    Icon={SquareDashed}
-                                />
-                            )}
-                        </RadioGroup>
-                        {isGptImage2 && editSize === 'custom' && (
-                            <div className='space-y-2 rounded-md border border-white/10 bg-white/5 p-3'>
-                                <div className='flex items-center gap-3'>
-                                    <div className='flex-1 space-y-1'>
-                                        <Label htmlFor='edit-custom-width' className='text-xs text-white/70'>
-                                            {t('common.width')}
-                                        </Label>
-                                        <Input
-                                            id='edit-custom-width'
-                                            type='number'
-                                            min={16}
-                                            max={3840}
-                                            step={16}
-                                            value={editCustomWidth}
-                                            onChange={(e) => setEditCustomWidth(parseInt(e.target.value, 10) || 0)}
-                                            disabled={isLoading}
-                                            className='rounded-md border border-white/20 bg-black text-white focus:border-white/50 focus:ring-white/50'
-                                        />
-                                    </div>
-                                    <span className='pt-5 text-white/60'>×</span>
-                                    <div className='flex-1 space-y-1'>
-                                        <Label htmlFor='edit-custom-height' className='text-xs text-white/70'>
-                                            {t('common.height')}
-                                        </Label>
-                                        <Input
-                                            id='edit-custom-height'
-                                            type='number'
-                                            min={16}
-                                            max={3840}
-                                            step={16}
-                                            value={editCustomHeight}
-                                            onChange={(e) => setEditCustomHeight(parseInt(e.target.value, 10) || 0)}
-                                            disabled={isLoading}
-                                            className='rounded-md border border-white/20 bg-black text-white focus:border-white/50 focus:ring-white/50'
-                                        />
-                                    </div>
-                                </div>
-                                <p className='text-xs text-white/50'>
-                                    {customRatio
-                                        ? t('form.customSizeSummary', {
-                                              pixels: customPixelCount.toLocaleString(),
-                                              percent: customPixelPercent,
-                                              ratio: customRatio
-                                          })
-                                        : t('form.customSizeSummaryNoRatio', {
-                                              pixels: customPixelCount.toLocaleString(),
-                                              percent: customPixelPercent
-                                          })}
-                                </p>
-                                {!customSizeValidation.valid && (
-                                    <p className='text-xs text-red-400'>
-                                        {formatSizeValidationReason(customSizeValidation.reason, t)}
-                                    </p>
-                                )}
-                                <p className='text-xs text-white/40'>{t('form.customSizeConstraints')}</p>
-                            </div>
-                        )}
-                    </div>
+                    <SizeSelect
+                        id='edit-size'
+                        size={editSize}
+                        onSizeChange={setEditSize}
+                        mode='edit'
+                        disabled={isLoading}
+                    />
 
                     <div className='space-y-3'>
                         <div>
@@ -897,7 +780,9 @@ export function EditingForm({
                 <CardFooter className='border-t border-white/10 p-4'>
                     <Button
                         type='submit'
-                        disabled={isLoading || !editPrompt || imageFiles.length === 0 || customSizeInvalid}
+                        disabled={
+                            isLoading || !editPrompt || modelMissing || imageFiles.length === 0 || sizeUnsupported
+                        }
                         translate='no'
                         className='flex w-full items-center justify-center gap-2 rounded-md bg-white text-black hover:bg-white/90 disabled:bg-white/10 disabled:text-white/40'>
                         <Loader2
